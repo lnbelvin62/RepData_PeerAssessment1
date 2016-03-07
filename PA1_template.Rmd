@@ -1,25 +1,528 @@
----
-title: "Reproducible Research: Peer Assessment 1"
-output: 
-  html_document:
-    keep_md: true
----
+## Loading and preprocessing the raw data.
 
+```{r, echo=TRUE}
+# Check for the CSV version of the raw data file.
+if (!file.exists('activity.csv')) {
+    if (!file.exists('activity.zip')) {
+        message('Neither activity.csv nor activity.zip exists.')
+        stop('Exiting because no further processing will be possible.')
+    } else {
+        zip_status <- system2("/usr/bin/unzip", "activity.zip",
+                              stdout=TRUE, stderr=TRUE)
 
-## Loading and preprocessing the data
+        # If the status object returned from the unzip system call has only
+        # two elements, the unzip succeeded; now check for activity.csv.
+        if (length(zip_status) == 2) {
+            if (!file.exists('activity.csv')) {
+                message('activity.zip exists and unzip of activity.zip ok.')
+                message('But activity.csv does not exist after the unzip.')
+                stop('Exiting as no further processing will be possible.')
+            }
+        } else if (attr(zip_status, "status") != 0) {
+            message('activity.zip exists but activity.zip unzip failed.')
+            stop('Exiting because no further processing will be possible.')
+        }
+    }
+}
+```
+
+```{r, echo=TRUE}
+# If execution reaches this point, the activity CSV file exists, so now
+# it can be read in.
+activity_raw_data <- read.csv('activity.csv', header=TRUE)
+```
 
 
 
 ## What is mean total number of steps taken per day?
 
+```{r, echo=TRUE}
+# First, determine the total number of steps taken per day.
+# Do this by subsetting the raw data per day.  There are 288
+# 5 minute intervals in one day (12 5-minute intervals per hour
+# times 24 hours equals 288 5-minute intervals per day).
+
+NUMBER_OF_DAYS <- 61
+INTERVALS_PER_DAY <- 288
+NUM_ZEROES_THRESHOLD <- 45
+
+dates <- c('2012-10-01', '2012-10-02', '2012-10-03', '2012-10-04',
+           '2012-10-05', '2012-10-06', '2012-10-07', '2012-10-08',
+           '2012-10-09', '2012-10-10', '2012-10-11', '2012-10-12',
+           '2012-10-13', '2012-10-14', '2012-10-15', '2012-10-16',
+           '2012-10-17', '2012-10-18', '2012-10-19', '2012-10-20',
+           '2012-10-21', '2012-10-22', '2012-10-23', '2012-10-24',
+           '2012-10-25', '2012-10-26', '2012-10-27', '2012-10-28',
+           '2012-10-29', '2012-10-30', '2012-10-31',
+           '2012-11-01', '2012-11-02', '2012-11-03', '2012-11-04',
+           '2012-11-05', '2012-11-06', '2012-11-07', '2012-11-08',
+           '2012-11-09', '2012-11-10', '2012-11-11', '2012-11-12',
+           '2012-11-13', '2012-11-14', '2012-11-15', '2012-11-16',
+           '2012-11-17', '2012-11-18', '2012-11-19', '2012-11-20',
+           '2012-11-21', '2012-11-22', '2012-11-23', '2012-11-24',
+           '2012-11-25', '2012-11-26', '2012-11-27', '2012-11-28',
+           '2012-11-29', '2012-11-30')
+total_steps_per_day <- c(rep(0, each = NUMBER_OF_DAYS))
+mean_steps_per_day <- c(rep(0.0, each = NUMBER_OF_DAYS))
+missing_values_per_day <- c(rep(0, each = NUMBER_OF_DAYS))
+
+# Create a data frame to hold the per-day data (number of steps, mean).
+summary_data_per_day <- data.frame(dates, total_steps_per_day,
+                                   mean_steps_per_day)
+
+# Sort / order the raw data by the date (second column).
+date_ordered_data <- activity_raw_data[order(activity_raw_data[,2]),]
+
+# Split the date-ordered data by the date.
+split_date_ordered_data <- split(date_ordered_data, date_ordered_data$date)
+
+# Loop through each of the 61 days / dates and sum the number of steps
+# in the 288 5-minute intervals for each day.  Save the sum and the
+# mean in the summary per day data frame.
+for (date_index in 1:NUMBER_OF_DAYS) {
+
+    # Add up all of the steps (column 1 of the split data).
+    # Enter the sum into the summary per day data frame.
+    summary_data_per_day$total_steps_per_day[[date_index]] <- as.numeric(sum(
+                                     split_date_ordered_data[[date_index]][1],
+                                     na.rm=TRUE))
+
+    # Use the sum of all of the steps to determine the mean.
+    summary_data_per_day$mean_steps_per_day[[date_index]] <- (
+                 summary_data_per_day$total_steps_per_day[[date_index]] /
+                 INTERVALS_PER_DAY)
+
+    #message(sprintf("Date index %d; total steps %d; mean %f",
+    #                date_index,
+    #                summary_data_per_day$total_steps_per_day[[date_index]],
+    #                summary_data_per_day$mean_steps_per_day[[date_index]]))
+}
+```
+
+```{r, echo=TRUE}
+# Make a histogram of the total number of steps taken each day.
+hist(summary_data_per_day$total_steps_per_day,
+     xlab = "Total steps per day",
+     main = "Total steps per day for all 61 days")
+
+# Calculate and report the mean and median of the total number of steps
+# taken per day.
+summary(summary_data_per_day$total_steps_per_day)
+
+# Result:
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#    0    6778   10400    9354   12810   21190 
+#
+```
+
 
 
 ## What is the average daily activity pattern?
 
+```{r, echo=TRUE}
+# Make a time series plot (i.e., type = "l") of the 5-minute interval
+# (x-axis) and the average number of steps taken, averaged across
+# all days (y-axis).
+
+# Note that the intervals in the raw data are named (numbered)
+# using the following convention - the ones and tens digits are
+# numbered as you might expect 0 for the first 5-minute interval
+# in an hour, 5 for the next, then 10, on up to 55.  But the hundreds
+# and thousands digits are numbered for the hour.  So the sequence
+# starts with 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, and then
+# goes to 100 (first 5-minute interval in the second hour), 105, 110, etc.
+
+intervals <- c(seq(from = 0, to = 55, by = 5),
+               seq(from = 100, to = 155, by = 5),
+               seq(from = 200, to = 255, by = 5),
+               seq(from = 300, to = 355, by = 5),
+               seq(from = 400, to = 455, by = 5),
+               seq(from = 500, to = 555, by = 5),
+               seq(from = 600, to = 655, by = 5),
+               seq(from = 700, to = 755, by = 5),
+               seq(from = 800, to = 855, by = 5),
+               seq(from = 900, to = 955, by = 5),
+               seq(from = 1000, to = 1055, by = 5),
+               seq(from = 1100, to = 1155, by = 5),
+               seq(from = 1200, to = 1255, by = 5),
+               seq(from = 1300, to = 1355, by = 5),
+               seq(from = 1400, to = 1455, by = 5),
+               seq(from = 1500, to = 1555, by = 5),
+               seq(from = 1600, to = 1655, by = 5),
+               seq(from = 1700, to = 1755, by = 5),
+               seq(from = 1800, to = 1855, by = 5),
+               seq(from = 1900, to = 1955, by = 5),
+               seq(from = 2000, to = 2055, by = 5),
+               seq(from = 2100, to = 2155, by = 5),
+               seq(from = 2200, to = 2255, by = 5),
+               seq(from = 2300, to = 2355, by = 5))
+total_steps_per_interval <- c(rep(0, each = INTERVALS_PER_DAY))
+mean_steps_per_interval <- c(rep(0.0, each = INTERVALS_PER_DAY))
+num_zeroes_per_interval <- c(rep(0, each = INTERVALS_PER_DAY))
+
+# Create a data frame to hold the per-interval data (number of steps, mean).
+summary_data_per_interval <- data.frame(intervals,
+                                        total_steps_per_interval,
+                                        mean_steps_per_interval,
+                                        num_zeroes_per_interval)
+
+# Average the number of steps per 5-minute interval across all days.
+# Sort / order the raw data by the 5-minute interval (third column).
+interval_ordered_data <- activity_raw_data[order(activity_raw_data[,3]),]
+
+# Split the interval-ordered data by the interval.
+split_interval_ordered_data <- split(interval_ordered_data,
+                                     interval_ordered_data$interval)
+
+# Loop through each of the 288 5-minute intervals and sum the number of
+# steps in the 61 days / dates for each interval.  Save the sum and the
+# mean in the summary per interval data frame.
+for (interval_index in 1:INTERVALS_PER_DAY) {
+
+    # Add up all of the steps (column 1 of the split data).
+    # Enter the sum into the summary per interval data frame.
+    summary_data_per_interval$total_steps_per_interval[[interval_index]] <- (
+            as.numeric(sum(split_interval_ordered_data[[interval_index]][1],
+                           na.rm=TRUE)))
+
+    # Use the sum of all of the steps to determine the mean.
+    summary_data_per_interval$mean_steps_per_interval[[interval_index]] <- (
+        summary_data_per_interval$total_steps_per_interval[[interval_index]] /
+        NUMBER_OF_DAYS)
+
+    # Also count the number of times zero is the number of steps
+    # (this will be used below as part of the strategy for filling
+    # in the missing values).
+    summary_data_per_interval$num_zeroes_per_interval[[interval_index]] <- (
+        as.numeric(sum(split_interval_ordered_data[[interval_index]][1] == 0,
+                       na.rm=TRUE)))
+
+    #message(sprintf("Interval index %d; total steps %d; mean %f; zeroes %d",
+    #    interval_index,
+    #    summary_data_per_interval$total_steps_per_interval[[interval_index]],
+    #    summary_data_per_interval$mean_steps_per_interval[[interval_index]],
+    #    summary_data_per_interval$num_zeroes_per_interval[[interval_index]]))
+}
+
+# Now that the per-interval data has been calculated, make a time series
+# plot of the intervals and the average steps per interval.
+plot(summary_data_per_interval$intervals,
+     summary_data_per_interval$mean_steps_per_interval,
+     xlab = "Intervals", ylab = "Average steps", type = "l",
+     main = "Time series plot of intervals and avg steps")
+```
+
+```{r, echo=TRUE}
+# Which 5-minute interval, on average across all the days in the dataset,
+# contains the maximum number of steps?
+summary(summary_data_per_interval$mean_steps_per_interval)
+max_interval_index <- which.max(
+                      summary_data_per_interval$mean_steps_per_interval)
+max_interval <- summary_data_per_interval$intervals[[max_interval_index]]
+print(max_interval)
+
+# The 5-minute interval containing the maximum number of steps (averaged
+# across all of the days) is "835" - which means 35 to 40 minutes during
+# the eighth hour of the day - otherwise known as 8:35am to 8:40am.
+```
 
 
-## Imputing missing values
+
+## Imputing missing values.
+
+```{r, echo=TRUE}
+# Calculate and report the total number of missing values in the dataset
+# (i.e., the total number of rows with NAs).
+total_missing_values <- sum(is.na(activity_raw_data))
+
+# Devise a strategy for filling in all of the missing values in the dataset.
+# The strategy does not need to be sophisticated.  For example, you could
+# use the mean / median for that day, or the mean for that 5-minute interval,
+# etc.
+
+# First there is a need for more detail about the missing values.
+
+# Create a data frame to hold the per-day missing values data.
+summary_missing_values_per_day <- data.frame(dates, missing_values_per_day)
+
+# Loop through each of the 61 days / dates and determine how many missing
+# values there are in the 288 5-minute intervals for each day.  Save the
+# count in the missing values per day data frame.
+for (date_index in 1:NUMBER_OF_DAYS) {
+
+    # Add up all of the steps (column 1 of the split data).
+    # Enter the sum into the summary per day data frame.
+    summary_missing_values_per_day$missing_values_per_day[[date_index]] = sum(
+                           is.na(split_date_ordered_data[[date_index]][1]))
+
+    #message(sprintf("Date index %d; missing values %d",
+    #    date_index,
+    #    summary_missing_values_per_day$missing_values_per_day[[date_index]]))
+}
+
+# Display a plot of the missing values per day against the days.
+plot(summary_missing_values_per_day$dates,
+     summary_missing_values_per_day$missing_values_per_day,
+     xlab = "Dates", ylab = "Missing values",
+     main = "Missing values per day", type="p")
+```
+
+```{r, echo=TRUE}
+# There are 61 total days in the dataset.  53 of those 61 days have
+# all values for the 288 intervals.  The other 8 days have no values
+# for the 288 intervals.
+
+# As the instructions suggest, using the mean for each 5-minute interval
+# (there are 53 days of actual values for each 5-minute interval) is not
+# unreasonable.  But doing so will result in some small, non-zero values
+# for many of the 5-minute intervals.  Instead, since it is unlikely that
+# the subject took any steps while he or she was sleeping, I prefer the
+# following strategy - if more than 85% of the actual values for a given
+# 5-minute interval are zero, use zero for the imputed value for that
+# 5-minute interval for all 8 of the missing days.  Since there are
+# 53 days of actual values, that means if 46 or more of those days show
+# a zero value for a particular 5-minute interval, use zero for the
+# imputed value for that interval for all 8 of the missing days.
+# If fewer than 85% of the actual values (45 or fewer of the 53 days)
+# are zero for a particular 5-minute interval, use the mean of
+# the 53 values for that particular 5-minute interval as the imputed value
+# for that particular 5-minute interval for all 8 of the missing days.
+# In practical terms, there will probably be not much difference between
+# this strategy and the simpler strategy of just using the mean of each
+# 5-minute interval, but I think this strategy will give more realistic
+# values.
+
+# I came up with the 85% threshold by looking at the summaries of each of
+# the 288 intervals to see how often the subject took steps during what
+# is commonly thought of us sleeping hours (10pm to 6am).  Most of the
+# intervals during these hours had zero counts of 46 or more.
+
+# Create a new dataset that is equal to the original dataset but with
+# the missing data filled in.
+
+# Fill in the missing data for the date-ordered data first.
+
+# Loop through each of the 61 days / dates and look for missing values
+# in each of the 288 5-minute intervals for each day.  If a missing value
+# is found, use the summary data per interval to see how many zeroes there
+# are for this interval across the 53 valid days.  If there are 46 or more
+# days with zeroes for this interval, set the value to zero.  Otherwise,
+# set the value to the mean of the number of steps for this interval over
+# the 53 valid days.
+splt_date_ordrd_impt_data <- split_date_ordered_data
+summ_data_per_intv <- summary_data_per_interval
+for (date_ndx in 1:NUMBER_OF_DAYS) {
+    for (intrvl_ndx in 1:INTERVALS_PER_DAY) {
+        if (is.na(
+            splt_date_ordrd_impt_data[[date_ndx]][[1]][[intrvl_ndx]])) {
+            if (summ_data_per_intv$num_zeroes_per_interval[[intrvl_ndx]] >
+                NUM_ZEROES_THRESHOLD) {
+                splt_date_ordrd_impt_data[[date_ndx]][[1]][[intrvl_ndx]] <- 0
+            } else {
+                splt_date_ordrd_impt_data[[date_ndx]][[1]][[intrvl_ndx]] <- (
+                     summ_data_per_intv$mean_steps_per_interval[[intrvl_ndx]])
+            }
+        }
+    }
+}
+
+# Verify that all of the missing values have been filled in.
+total_missing_imputed_values <- sum(is.na(splt_date_ordrd_impt_data))
+print(total_missing_imputed_values)
+```
+
+```{r, echo=TRUE}
+# Make a histogram of the total number of steps taken each day and
+# calculate and report the mean and median total number of steps
+# taken per day.
+
+# Create a data frame to hold the per-day data (number of steps, mean).
+summary_impt_data_per_day <- data.frame(dates, total_steps_per_day,
+                                        mean_steps_per_day)
+
+# Loop through each of the 61 days / dates and sum the number of steps
+# in the 288 5-minute intervals for each day.  Save the sum and the
+# mean in the summary (imputed) per day data frame.
+for (date_index in 1:NUMBER_OF_DAYS) {
+
+    # Add up all of the steps (column 1 of the split data).
+    # Enter the sum into the summary per day data frame.
+    summary_impt_data_per_day$total_steps_per_day[[date_index]] <- (
+            as.numeric(sum(splt_date_ordrd_impt_data[[date_index]][1])))
+
+    # Use the sum of all of the steps to determine the mean.
+    summary_impt_data_per_day$mean_steps_per_day[[date_index]] <- (
+            summary_impt_data_per_day$total_steps_per_day[[date_index]] /
+            INTERVALS_PER_DAY)
+
+    #message("Imputed data:")
+    #message(sprintf("Date index %d; total steps %f; mean %f",
+    #        date_index,
+    #        summary_impt_data_per_day$total_steps_per_day[[date_index]],
+    #        summary_impt_data_per_day$mean_steps_per_day[[date_index]]))
+}
+```
+
+```{r, echo=TRUE}
+# Make a histogram of the total number of steps taken each day.
+hist(summary_impt_data_per_day$total_steps_per_day)
+
+# Calculate and report the mean and median of the total number of steps
+# taken per day.
+summary(summary_impt_data_per_day$total_steps_per_day)
+
+# Result:
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#   41    9198   10400   10560   12810   21190 
+#    0    6778   10400    9354   12810   21190 
+```
+
+```{r, echo=TRUE}
+# Do these values differ from the estimates from the first part of
+# the assignment?  What is the impact of imputing missing data on
+# the estimates of the total daily number of steps?
+
+# The minimum value is obviously different - before using the imputed
+# data, there were 8 days of zero steps because 8 days have all missing
+# values.  The first quartile is obviously lower with the raw data,
+# again, because of the 8 days of zero steps.  But the median and
+# third quartile values are the same, as is the maximum.  The mean is
+# higher with the imputed values, again because there aren't 8 days of
+# zero steps bringing the mean down.
+```
 
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+```{r, echo=TRUE}
+# Use the dataset with the filled-in missing values for this part.
+
+# Create a new factor variable in the dataset with two levels -
+# "weekday" and "weekend" indicating whether a given date is a weekday
+# or weekend day.
+
+# Make a panel plot containing a time series plot (i.e., type = "l") of
+# the 5-minute interval (x-axis) and the average number of steps taken,
+# averaged across all weekday days or weekend days (y-axis).
+
+# Since this part of the assignment needs the per-interval data set,
+# and the imputed data above is for the per-day data set, I need to
+# generate the imputed data for the per-interval data set.
+
+# Loop through each of the 288 5-minute intervals and look for missing
+# values in each of the 61 days / dates.  If a missing value is found,
+# use the summary data per interval to see how many zeroes there are
+# for this interval across the 53 valid days.  If there are 46 or more
+# days with zeroes for this interval, set the value to zero.  Otherwise,
+# set the value to the mean of the number of steps for this interval over
+# the 53 valid days.
+splt_intv_ordrd_impt_data <- split_interval_ordered_data
+summ_data_per_intv <- summary_data_per_interval
+for (intrvl_ndx in 1:INTERVALS_PER_DAY) {
+    for (date_ndx in 1:NUMBER_OF_DAYS) {
+        if (is.na(
+            splt_intv_ordrd_impt_data[[intrvl_ndx]][[1]][[date_ndx]])) {
+            if (summ_data_per_intv$num_zeroes_per_interval[[intrvl_ndx]] >
+                NUM_ZEROES_THRESHOLD) {
+                splt_intv_ordrd_impt_data[[intrvl_ndx]][[1]][[date_ndx]] <- 0
+            } else {
+                splt_intv_ordrd_impt_data[[intrvl_ndx]][[1]][[date_ndx]] <- (
+                     summ_data_per_intv$mean_steps_per_interval[[intrvl_ndx]])
+            }
+        }
+    }
+}
+
+# Verify that all of the missing values have been filled in.
+total_missing_per_intv_imputed_values <- sum(is.na(splt_intv_ordrd_impt_data))
+print(total_missing_per_intv_imputed_values)
+
+# Create the day type factor variable.
+day_types <- c("weekday", "weekday", "weekday", "weekday", "weekday",
+               "weekend", "weekend",
+               "weekday", "weekday", "weekday", "weekday", "weekday",
+               "weekend", "weekend",
+               "weekday", "weekday", "weekday", "weekday", "weekday",
+               "weekend", "weekend",
+               "weekday", "weekday", "weekday", "weekday", "weekday",
+               "weekend", "weekend",
+               "weekday", "weekday", "weekday", "weekday", "weekday",
+               "weekend", "weekend",
+               "weekday", "weekday", "weekday", "weekday", "weekday",
+               "weekend", "weekend",
+               "weekday", "weekday", "weekday", "weekday", "weekday",
+               "weekend", "weekend",
+               "weekday", "weekday", "weekday", "weekday", "weekday",
+               "weekend", "weekend",
+               "weekday", "weekday", "weekday", "weekday", "weekday")
+factor_day_types <- factor(day_types)
+```
+
+```{r, echo=TRUE}
+t_steps_per_intv <- total_steps_per_interval
+m_steps_per_intv <- mean_steps_per_interval
+summ_data_per_intrvl_wkday <- data.frame(intervals,
+                                         t_steps_per_intv,
+                                         m_steps_per_intv)
+summ_data_per_intrvl_wkend <- data.frame(intervals,
+                                         t_steps_per_intv,
+                                         m_steps_per_intv)
+
+# Loop through each of the 288 5-minute intervals and sum the number of
+# steps in the 16 weekend days and separately sum the number of steps
+# in the 45 weekday days.
+# mean in the summary per interval data frame.
+for (intrvl_ndx in 1:INTERVALS_PER_DAY) {
+    for (date_ndx in 1:NUMBER_OF_DAYS) {
+
+        if ((date_ndx == 6) || (date_ndx == 7) ||
+            (date_ndx == 13) || (date_ndx == 14) ||
+            (date_ndx == 20) || (date_ndx == 21) ||
+            (date_ndx == 27) || (date_ndx == 28) ||
+            (date_ndx == 34) || (date_ndx == 35) ||
+            (date_ndx == 41) || (date_ndx == 42) ||
+            (date_ndx == 48) || (date_ndx == 49) ||
+            (date_ndx == 55) || (date_ndx == 56)) {
+            summ_data_per_intrvl_wkend$t_steps_per_intv[[intrvl_ndx]] <- (
+            summ_data_per_intrvl_wkend$t_steps_per_intv[[intrvl_ndx]] +
+            splt_intv_ordrd_impt_data[[intrvl_ndx]][[1]][[date_ndx]])
+        } else {
+            summ_data_per_intrvl_wkday$t_steps_per_intv[[intrvl_ndx]] <- (
+            summ_data_per_intrvl_wkday$t_steps_per_intv[[intrvl_ndx]] +
+            splt_intv_ordrd_impt_data[[intrvl_ndx]][[1]][[date_ndx]])
+        }
+    }
+}
+
+# Now calculate the mean number of steps.
+for (intrvl_ndx in 1:INTERVALS_PER_DAY) {
+    summ_data_per_intrvl_wkday$m_steps_per_intv[[intrvl_ndx]] = (
+         summ_data_per_intrvl_wkday$t_steps_per_intv[[intrvl_ndx]] / 45)
+    summ_data_per_intrvl_wkend$m_steps_per_intv[[intrvl_ndx]] = (
+         summ_data_per_intrvl_wkend$t_steps_per_intv[[intrvl_ndx]] / 16)
+}
+```
+
+```{r, echo=TRUE}
+# Now plot the average number of steps taken for weekdays and weekend days.
+par(mfrow = c(2, 1))
+plot(summ_data_per_intrvl_wkend$intervals,
+     summ_data_per_intrvl_wkend$m_steps_per_intv,
+     xlab = "Intervals", ylab = "Average steps",
+     main = "Weekend avg steps per interval",
+     ylim = c(0, 250), type = "l")
+plot(summ_data_per_intrvl_wkday$intervals,
+     summ_data_per_intrvl_wkday$m_steps_per_intv,
+     xlab = "Intervals", ylab = "Average steps",
+     main = "Weekday avg steps per interval",
+     ylim = c(0, 250), type = "l")
+
+# There clearly are differences in activity patterns between weekdays
+# and weekends.  The subject gets up earlier during the week and appears
+# to exercise or otherwise walk a lot of steps in the morning.  On weekends,
+# the subject gets up later and goes to bed later and also has a generally
+# higher level of activity during the morning and afternoon (excluding
+# the exercise or whatever activity occurs in the early-mid morning
+# during the week).
+```
